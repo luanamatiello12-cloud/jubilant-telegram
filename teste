@@ -1,0 +1,275 @@
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: transparent; }
+#game-container {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  font-family: var(--font-sans, sans-serif);
+  user-select: none;
+}
+canvas { display: block; border-radius: 12px; border: 0.5px solid var(--color-border-tertiary, #ccc); }
+#hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  margin-bottom: 8px;
+}
+.player-info { width: 45%; }
+.p1-info { text-align: left; }
+.p2-info { text-align: right; }
+.player-name { font-size: 13px; font-weight: 500; color: var(--color-text-secondary, #666); margin-bottom: 4px; }
+.hp-bar-bg {
+  height: 14px;
+  background: var(--color-background-secondary, #eee);
+  border-radius: 7px;
+  border: 0.5px solid var(--color-border-tertiary, #ccc);
+  overflow: hidden;
+}
+.hp-bar { height: 100%; border-radius: 7px; transition: width 0.1s; }
+#timer-box { text-align: center; }
+#timer { font-size: 22px; font-weight: 500; color: var(--color-text-primary, #111); }
+#overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  border-radius: 12px;
+  z-index: 10;
+}
+#overlay h2 { color: #fff; font-size: 28px; font-weight: 500; margin-bottom: 12px; }
+#overlay p { color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 20px; text-align: center; }
+#overlay button {
+  padding: 10px 28px;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 0.5px solid var(--color-border-secondary, #aaa);
+  background: var(--color-background-primary, #fff);
+  color: var(--color-text-primary, #111);
+  cursor: pointer;
+}
+#canvas-wrap { position: relative; }
+#controls {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary, #666);
+}
+.ctrl { background: var(--color-background-secondary, #eee); border-radius: 8px; padding: 6px 10px; }
+</style>
+
+<div id="game-container">
+  <div id="hud">
+    <div class="player-info p1-info">
+      <div class="player-name">Jogador 1</div>
+      <div class="hp-bar-bg"><div class="hp-bar" id="hp1" style="width:100%;background:#378ADD;"></div></div>
+    </div>
+    <div id="timer-box"><div id="timer">60</div></div>
+    <div class="player-info p2-info">
+      <div class="player-name">Jogador 2</div>
+      <div class="hp-bar-bg" style="transform:scaleX(-1)"><div class="hp-bar" id="hp2" style="width:100%;background:#D85A30;"></div></div>
+    </div>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="c" width="800" height="380"></canvas>
+    <div id="overlay">
+      <h2>Batalha!</h2>
+      <p>J1: WASD + F (soco) G (chute)<br>J2: Setas + K (soco) L (chute)</p>
+      <button onclick="startGame()">Iniciar</button>
+    </div>
+  </div>
+  <div id="controls">
+    <div class="ctrl">J1: A/D mover · W pular · F soco · G chute</div>
+    <div class="ctrl">J2: ←/→ mover · ↑ pular · K soco · L chute</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const FLOOR = H - 80;
+
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+let gameRunning = false, gameOver = false, timer = 60, lastTime = 0, timerAcc = 0;
+
+const fighters = [
+  {
+    x: 150, y: FLOOR, vx: 0, vy: 0,
+    w: 50, h: 80, hp: 100, maxHp: 100,
+    color: '#378ADD', darkColor: '#185FA5',
+    facing: 1, onGround: false,
+    attacking: false, attackType: '', attackTimer: 0, attackCooldown: 0,
+    hitTimer: 0,
+    keys: { left: 'a', right: 'd', jump: 'w', punch: 'f', kick: 'g' }
+  },
+  {
+    x: 600, y: FLOOR, vx: 0, vy: 0,
+    w: 50, h: 80, hp: 100, maxHp: 100,
+    color: '#D85A30', darkColor: '#993C1D',
+    facing: -1, onGround: false,
+    attacking: false, attackType: '', attackTimer: 0, attackCooldown: 0,
+    hitTimer: 0,
+    keys: { left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp', punch: 'k', kick: 'l' }
+  }
+];
+
+function startGame() {
+  fighters[0].x = 150; fighters[0].y = FLOOR; fighters[0].hp = 100; fighters[0].vx = 0; fighters[0].vy = 0; fighters[0].attackCooldown = 0;
+  fighters[1].x = 600; fighters[1].y = FLOOR; fighters[1].hp = 100; fighters[1].vx = 0; fighters[1].vy = 0; fighters[1].attackCooldown = 0;
+  timer = 60; timerAcc = 0; gameOver = false; gameRunning = true;
+  document.getElementById('overlay').style.display = 'none';
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function showOverlay(title, msg) {
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = `<h2>${title}</h2><p>${msg}</p><button onclick="startGame()">Jogar novamente</button>`;
+  ov.style.display = 'flex';
+}
+
+function update(dt) {
+  fighters.forEach((f, i) => {
+    const enemy = fighters[1 - i];
+    const k = f.keys;
+
+    if (keys[k.left]) { f.vx = -4; f.facing = -1; }
+    else if (keys[k.right]) { f.vx = 4; f.facing = 1; }
+    else f.vx *= 0.8;
+
+    if (keys[k.jump] && f.onGround) { f.vy = -14; f.onGround = false; }
+
+    f.vy += 0.6;
+    f.x += f.vx;
+    f.y += f.vy;
+
+    if (f.y >= FLOOR) { f.y = FLOOR; f.vy = 0; f.onGround = true; }
+    if (f.x < 10) f.x = 10;
+    if (f.x > W - f.w - 10) f.x = W - f.w - 10;
+
+    if (f.attackCooldown > 0) f.attackCooldown -= dt;
+    if (f.attackTimer > 0) { f.attackTimer -= dt; if (f.attackTimer <= 0) f.attacking = false; }
+    if (f.hitTimer > 0) f.hitTimer -= dt;
+
+    if (!f.attacking && f.attackCooldown <= 0) {
+      if (keys[k.punch]) { f.attacking = true; f.attackType = 'punch'; f.attackTimer = 0.2; f.attackCooldown = 0.4; doHit(f, enemy, 8); }
+      else if (keys[k.kick]) { f.attacking = true; f.attackType = 'kick'; f.attackTimer = 0.3; f.attackCooldown = 0.6; doHit(f, enemy, 14); }
+    }
+  });
+
+  fighters.forEach((f, i) => {
+    const hp = Math.max(0, f.hp);
+    document.getElementById('hp' + (i + 1)).style.width = (hp / f.maxHp * 100) + '%';
+  });
+}
+
+function doHit(attacker, defender, dmg) {
+  const ax = attacker.x + (attacker.facing === 1 ? attacker.w : 0);
+  const dx = defender.x + defender.w / 2;
+  const dist = Math.abs(ax - dx);
+  const vertOk = Math.abs(attacker.y - defender.y) < 60;
+  if (dist < 80 && vertOk && attacker.facing === Math.sign(defender.x - attacker.x)) {
+    defender.hp -= dmg;
+    defender.hitTimer = 0.2;
+    defender.vx = attacker.facing * 3;
+    if (defender.hp < 0) defender.hp = 0;
+  }
+}
+
+function drawFighter(f) {
+  const x = f.x, y = f.y - f.h;
+  const flash = f.hitTimer > 0;
+  const col = flash ? '#fff' : f.color;
+  const dark = flash ? '#ccc' : f.darkColor;
+
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.ellipse(x + f.w/2, y + 16, 14, 14, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle = col;
+  ctx.fillRect(x + 10, y + 28, f.w - 20, 30);
+
+  ctx.fillStyle = dark;
+  ctx.fillRect(x + 12, y + 56, 10, 24);
+  ctx.fillRect(x + f.w - 22, y + 56, 10, 24);
+
+  if (f.attacking && f.attackType === 'punch') {
+    const armX = f.facing === 1 ? x + f.w - 4 : x - 18;
+    ctx.fillStyle = col;
+    ctx.fillRect(armX, y + 32, 22, 10);
+  } else if (f.attacking && f.attackType === 'kick') {
+    const legX = f.facing === 1 ? x + f.w - 4 : x - 24;
+    ctx.fillStyle = col;
+    ctx.fillRect(legX, y + 50, 28, 10);
+  } else {
+    ctx.fillStyle = dark;
+    ctx.fillRect(x, y + 30, 10, 20);
+    ctx.fillRect(x + f.w - 10, y + 30, 10, 20);
+  }
+}
+
+function drawScene() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a1a2e');
+  grad.addColorStop(1, '#16213e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  for (let i = 0; i < 60; i++) {
+    const sx = (i * 137.5) % W, sy = (i * 97.3) % (H - 100);
+    ctx.fillStyle = `rgba(255,255,255,${0.3 + (i % 5) * 0.1})`;
+    ctx.beginPath(); ctx.arc(sx, sy, 1, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle = '#0d3b2e';
+  ctx.fillRect(0, FLOOR, W, H - FLOOR);
+  ctx.fillStyle = '#1d9e75';
+  ctx.fillRect(0, FLOOR, W, 6);
+
+  ctx.fillStyle = 'rgba(29,158,117,0.15)';
+  for (let i = 0; i < W; i += 60) {
+    ctx.beginPath();
+    ctx.moveTo(i, FLOOR);
+    ctx.lineTo(i + 20, FLOOR - 30 - (i % 40));
+    ctx.lineTo(i + 40, FLOOR);
+    ctx.fill();
+  }
+}
+
+function loop(ts) {
+  if (!gameRunning) return;
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  timerAcc += dt;
+  if (timerAcc >= 1) { timer--; timerAcc -= 1; document.getElementById('timer').textContent = timer; }
+
+  update(dt);
+  ctx.clearRect(0, 0, W, H);
+  drawScene();
+  fighters.forEach(drawFighter);
+
+  if (fighters[0].hp <= 0 || fighters[1].hp <= 0 || timer <= 0) {
+    gameRunning = false;
+    let msg;
+    if (fighters[0].hp <= 0 && fighters[1].hp <= 0) msg = 'Empate!';
+    else if (fighters[0].hp <= 0) msg = 'Jogador 2 vence!';
+    else if (fighters[1].hp <= 0) msg = 'Jogador 1 vence!';
+    else msg = fighters[0].hp > fighters[1].hp ? 'Jogador 1 vence por pontos!' : fighters[1].hp > fighters[0].hp ? 'Jogador 2 vence por pontos!' : 'Empate!';
+    showOverlay('Fim de jogo', msg);
+    return;
+  }
+
+  requestAnimationFrame(loop);
+}
+</script>
